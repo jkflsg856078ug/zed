@@ -1,6 +1,5 @@
 mod add_llm_provider_modal;
-mod configure_context_server_modal;
-mod configure_remote_context_server_modal;
+pub mod configure_context_server_modal;
 mod configure_context_server_tools_modal;
 mod manage_profiles_modal;
 mod tool_picker;
@@ -44,7 +43,6 @@ pub(crate) use manage_profiles_modal::ManageProfilesModal;
 
 use crate::{
     agent_configuration::add_llm_provider_modal::{AddLlmProviderModal, LlmCompatibleProvider},
-    agent_configuration::configure_remote_context_server_modal::ConfigureRemoteContextServerModal,
 };
 use gpui::actions;
 
@@ -481,7 +479,7 @@ impl AgentConfiguration {
                 move |window, cx| {
                     Some(ContextMenu::build(window, cx, |menu, _window, _cx| {
                         menu.entry("Add Custom Server", None, {
-                            |window, cx| window.dispatch_action(AddContextServer.boxed_clone(), cx)
+                            |window, cx| window.dispatch_action(crate::AddContextServer.boxed_clone(), cx)
                         })
                                                             .entry("Add Remote Server", None, {
                                                                 |window, cx| window.dispatch_action(AddRemoteContextServer.boxed_clone(), cx)
@@ -680,13 +678,14 @@ impl AgentConfiguration {
                             let is_remote = is_remote;
                             move |window, cx| {
                                 if is_remote {
-                                    ConfigureRemoteContextServerModal::show_modal_for_existing_server(
+                                    crate::agent_configuration::configure_context_server_modal::ConfigureContextServerModal::show_modal_for_existing_server(
                                         context_server_id.clone(),
+                                        language_registry.clone(),
                                         workspace.clone(),
                                         window,
                                         cx,
                                     )
-                                    .detach_and_log_err(cx);
+                                    .detach();
                                 } else {
                                     ConfigureContextServerModal::show_modal_for_existing_server(
                                         context_server_id.clone(),
@@ -695,7 +694,7 @@ impl AgentConfiguration {
                                         window,
                                         cx,
                                     )
-                                    .detach_and_log_err(cx);
+                                    .detach();
                                 }
                             }
                         }).when(tool_count > 0, |this| this.entry("View Tools", None, {
@@ -973,7 +972,7 @@ impl AgentConfiguration {
                                                                     cx,
                                                                 ).await
                                                             })
-                                                            .detach_and_log_err(cx);
+                                                            .detach();
                                                     }
                                                 }
                                             ),
