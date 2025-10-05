@@ -1,5 +1,4 @@
-mod http;
-mod sse;
+pub mod http;
 mod stdio_transport;
 
 use std::{pin::Pin, sync::Arc};
@@ -12,8 +11,7 @@ use gpui::App;
 use http_client::HttpClient;
 use url::Url;
 
-pub use http::*;
-pub use sse::*;
+pub use self::http::*;
 pub use stdio_transport::*;
 
 /// Authentication configuration for HTTP transports
@@ -86,13 +84,6 @@ pub fn build_transport(
                 transport
             };
             Ok(Arc::new(transport))
-        }
-        "sse" => {
-            log::info!("Using SSE transport for {}", endpoint);
-            Ok(Arc::new(SseTransport::new(
-                http_client,
-                endpoint.to_string(),
-            )))
         }
         _ => {
             log::error!("Unsupported URL scheme: {}", endpoint.scheme());
