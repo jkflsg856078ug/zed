@@ -1,4 +1,4 @@
-name: Build Fork Binaries
+name: Build Fork Binaries (Fast)
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: '0'
+  CARGO_INCREMENTAL: '1'
   RUST_BACKTRACE: '1'
 
 jobs:
@@ -34,39 +34,18 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          cache: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup environment
-        run: |
-          $version = & ./script/get-crate-version.ps1 zed
-          echo "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
-          $channel = Get-Content "crates/zed/RELEASE_CHANNEL"
-          echo "ZED_RELEASE_CHANNEL=$channel" >> $env:GITHUB_ENV
-        shell: pwsh
-
-      - name: Generate licenses
-        run: ./script/generate-licenses.ps1
-        shell: pwsh
-        continue-on-error: true
-
-      - name: Build Zed binaries
-        run: |
-          cargo build --release --package zed --package cli --target x86_64-pc-windows-msvc
+      - name: Build Zed and CLI (parallel)
+        run: cargo build --release --package zed --package cli --target x86_64-pc-windows-msvc
         shell: pwsh
 
       - name: Build remote_server
-        run: |
-          cargo build --release --package remote_server --target x86_64-pc-windows-msvc
+        run: cargo build --release --package remote_server --target x86_64-pc-windows-msvc
         shell: pwsh
 
-      - name: Create archive
+      - name: Package binaries
         run: |
-          $version = $env:RELEASE_VERSION
-          $channel = $env:ZED_RELEASE_CHANNEL
           New-Item -ItemType Directory -Path "zed-windows" -Force
           Copy-Item "target/x86_64-pc-windows-msvc/release/zed.exe" "zed-windows/"
           Copy-Item "target/x86_64-pc-windows-msvc/release/cli.exe" "zed-windows/"
@@ -78,11 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries-x86_64
-          path: |
-            zed-windows-x86_64.zip
-            target/x86_64-pc-windows-msvc/release/zed.exe
-            target/x86_64-pc-windows-msvc/release/cli.exe
-            target/x86_64-pc-windows-msvc/release/remote_server.exe
+          path: zed-windows-x86_64.zip
 
   build_linux_remote_server:
     name: Build Linux Remote Server
@@ -93,34 +68,25 @@ jobs:
         with:
           clean: false
 
-      - name: Install system dependencies
-        run: ./script/linux
+      - name: Install minimal dependencies
+        run: sudo apt-get update && sudo apt-get install -y musl-tools clang libssl-dev pkg-config
         shell: bash
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          target: x86_64-unknown-linux-musl
+          cache: true
 
-      - name: Add musl target
-        run: rustup target add x86_64-unknown-linux-musl
-
-      - name: Install musl-tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Generate licenses
-        run: ./script/generate-licenses
-
-      - name: Build remote server
+      - name: Build remote server (static)
         run: |
           export RUSTFLAGS="-C target-feature=+crt-static"
           cargo build --release --target x86_64-unknown-linux-musl --package remote_server
         shell: bash
 
       - name: Compress remote server
-        run: |
-          gzip -f --stdout --best target/x86_64-unknown-linux-musl/release/remote_server > zed-remote-server-linux-x86_64.gz
-        shell: bash
+        run: gzip -f --stdout --best target/x86_64-unknown-linux-musl/release/remote_server > zed-remote-server-linux-x86_64.gz
 
       - name: Upload remote server
         uses: actions/upload-artifact@v4
@@ -128,8 +94,8 @@ jobs:
           name: linux-remote-server-x86_64
           path: zed-remote-server-linux-x86_64.gz
 
-  build_linux_full:
-    name: Build Linux Full Package
+  build_linux_zed:
+    name: Build Linux Zed
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -138,35 +104,27 @@ jobs:
           clean: false
 
       - name: Install system dependencies
-        run: ./script/linux
-        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev libfreetype6-dev libxcb-composite0-dev libssl-dev libxkbcommon-x11-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev libxcb-shm0-dev libasound2-dev libwayland-dev libxkbcommon-dev libvulkan-dev clang cmake mold
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          cache: true
 
-      - name: Add musl target
-        run: rustup target add x86_64-unknown-linux-musl
-
-      - name: Generate licenses
-        run: ./script/generate-licenses
-
-      - name: Build Linux bundle
-        run: ./script/bundle-linux
+      - name: Build Zed and CLI
+        run: cargo build --release --package zed --package cli
         shell: bash
-        continue-on-error: true
 
-      - name: List build artifacts
+      - name: Package binaries
         run: |
-          find target/release -type f -name "*.tar.gz" -o -name "*.gz" | head -20
-        shell: bash
+          mkdir -p zed-linux
+          cp target/release/zed zed-linux/
+          cp target/release/cli zed-linux/
+          tar -czf zed-linux-x86_64.tar.gz -C zed-linux .
 
-      - name: Upload Linux package
+      - name: Upload Linux binaries
         uses: actions/upload-artifact@v4
         with:
-          name: linux-package-x86_64
-          path: |
-            target/release/*.tar.gz
-            target/release/*.gz
-          if-no-files-found: warn
+          name: linux-zed-x86_64
+          path: zed-linux-x86_64.tar.gz
