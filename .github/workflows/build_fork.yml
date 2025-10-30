@@ -104,7 +104,7 @@ jobs:
           clean: false
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev libfreetype6-dev libxcb-composite0-dev libssl-dev libxkbcommon-x11-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev libxcb-shm0-dev libasound2-dev libwayland-dev libxkbcommon-dev libvulkan-dev clang cmake mold
+        run: sudo apt-get update && sudo apt-get install -y gcc g++ libasound2-dev libfontconfig-dev libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libssl-dev libzstd-dev libvulkan1 make cmake clang mold
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
