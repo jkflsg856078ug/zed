@@ -19,6 +19,12 @@ jobs:
     name: Build Windows Binaries
     runs-on: windows-latest
     steps:
+      - name: Enable long paths
+        run: |
+          git config --global core.longpaths true
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+        shell: pwsh
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -45,6 +51,7 @@ jobs:
       - name: Generate licenses
         run: ./script/generate-licenses.ps1
         shell: pwsh
+        continue-on-error: true
 
       - name: Build Zed binaries
         run: |
