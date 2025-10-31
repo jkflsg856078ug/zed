@@ -43,7 +43,9 @@ use serde::{Deserialize, Serialize};
 use settings::{LanguageModelSelection, Settings as _, SettingsStore};
 use std::any::TypeId;
 
-use crate::agent_configuration::{ConfigureContextServerModal, ManageProfilesModal};
+use crate::agent_configuration::{
+    AddRemoteContextServer, ConfigureContextServerModal, ManageProfilesModal,
+};
 pub use crate::agent_panel::{AgentPanel, ConcreteAssistantPanelDelegate};
 pub use crate::inline_assistant::InlineAssistant;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};
@@ -129,12 +131,6 @@ actions!(
         ToggleBurnMode,
     ]
 );
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Action)]
-#[action(namespace = agent)]
-#[action(deprecated_aliases = ["assistant::QuoteSelection"])]
-/// Quotes the current selection in the agent panel's message editor.
-pub struct QuoteSelection;
 
 /// Creates a new conversation thread, optionally based on an existing thread.
 #[derive(Default, Clone, PartialEq, Deserialize, JsonSchema, Action)]
@@ -256,7 +252,7 @@ pub fn init(
 ) {
     AgentSettings::register(cx);
 
-    assistant_context::init(client.clone(), cx);
+    assistant_text_thread::init(client.clone(), cx);
     rules_library::init(cx);
     if !is_eval {
         // Initializing the language model from the user settings messes with the eval, so we only initialize them when
@@ -278,6 +274,20 @@ pub fn init(
     terminal_inline_assistant::init(fs.clone(), prompt_builder, client.telemetry().clone(), cx);
     cx.observe_new(move |workspace, window, cx| {
         ConfigureContextServerModal::register(workspace, language_registry.clone(), window, cx)
+    })
+    .detach();
+    cx.observe_new(move |workspace: &mut workspace::Workspace, _window, cx| {
+        workspace.register_action({
+            move |workspace, _: &AddRemoteContextServer, window, cx| {
+                crate::agent_configuration::configure_context_server_modal::ConfigureContextServerModal::new_remote_server(
+                    workspace.project().clone(),
+                    workspace.weak_handle(),
+                    None, // language registry will be auto-resolved
+                    window,
+                    cx,
+                ).detach();
+            }
+        });
     })
     .detach();
     cx.observe_new(ManageProfilesModal::register).detach();

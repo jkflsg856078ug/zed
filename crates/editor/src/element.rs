@@ -232,6 +232,8 @@ impl EditorElement {
         register_action(editor, window, Editor::blame_hover);
         register_action(editor, window, Editor::delete);
         register_action(editor, window, Editor::tab);
+        register_action(editor, window, Editor::next_snippet_tabstop);
+        register_action(editor, window, Editor::previous_snippet_tabstop);
         register_action(editor, window, Editor::backtab);
         register_action(editor, window, Editor::indent);
         register_action(editor, window, Editor::outdent);
@@ -458,7 +460,6 @@ impl EditorElement {
         register_action(editor, window, Editor::toggle_code_actions);
         register_action(editor, window, Editor::open_excerpts);
         register_action(editor, window, Editor::open_excerpts_in_split);
-        register_action(editor, window, Editor::open_proposed_changes_editor);
         register_action(editor, window, Editor::toggle_soft_wrap);
         register_action(editor, window, Editor::toggle_tab_bar);
         register_action(editor, window, Editor::toggle_line_numbers);
@@ -493,8 +494,11 @@ impl EditorElement {
         register_action(editor, window, Editor::stage_and_next);
         register_action(editor, window, Editor::unstage_and_next);
         register_action(editor, window, Editor::expand_all_diff_hunks);
+        register_action(editor, window, Editor::collapse_all_diff_hunks);
         register_action(editor, window, Editor::go_to_previous_change);
         register_action(editor, window, Editor::go_to_next_change);
+        register_action(editor, window, Editor::go_to_prev_reference);
+        register_action(editor, window, Editor::go_to_next_reference);
 
         register_action(editor, window, |editor, action, window, cx| {
             if let Some(task) = editor.format(action, window, cx) {
@@ -651,7 +655,6 @@ impl EditorElement {
     fn mouse_left_down(
         editor: &mut Editor,
         event: &MouseDownEvent,
-        hovered_hunk: Option<Range<Anchor>>,
         position_map: &PositionMap,
         line_numbers: &HashMap<MultiBufferRow, LineNumberLayout>,
         window: &mut Window,
@@ -667,7 +670,20 @@ impl EditorElement {
         let mut click_count = event.click_count;
         let mut modifiers = event.modifiers;
 
-        if let Some(hovered_hunk) = hovered_hunk {
+        if let Some(hovered_hunk) =
+            position_map
+                .display_hunks
+                .iter()
+                .find_map(|(hunk, hunk_hitbox)| match hunk {
+                    DisplayDiffHunk::Folded { .. } => None,
+                    DisplayDiffHunk::Unfolded {
+                        multi_buffer_range, ..
+                    } => hunk_hitbox
+                        .as_ref()
+                        .is_some_and(|hitbox| hitbox.is_hovered(window))
+                        .then(|| multi_buffer_range.clone()),
+                })
+        {
             editor.toggle_single_diff_hunk(hovered_hunk, cx);
             cx.notify();
             return;
@@ -1194,10 +1210,10 @@ impl EditorElement {
             if mouse_over_inline_blame || mouse_over_popover {
                 editor.show_blame_popover(*buffer_id, blame_entry, event.position, false, cx);
             } else if !keyboard_grace {
-                editor.hide_blame_popover(cx);
+                editor.hide_blame_popover(false, cx);
             }
         } else {
-            editor.hide_blame_popover(cx);
+            editor.hide_blame_popover(false, cx);
         }
 
         let breakpoint_indicator = if gutter_hovered {
@@ -1409,7 +1425,11 @@ impl EditorElement {
                     layouts.push(layout);
                 }
 
-                let player = editor.current_user_player_color(cx);
+                let mut player = editor.current_user_player_color(cx);
+                if !editor.is_focused(window) {
+                    const UNFOCUS_EDITOR_SELECTION_OPACITY: f32 = 0.5;
+                    player.selection = player.selection.opacity(UNFOCUS_EDITOR_SELECTION_OPACITY);
+                }
                 selections.push((player, layouts));
 
                 if let SelectionDragState::Dragging {
@@ -3157,7 +3177,7 @@ impl EditorElement {
             i += 1;
         }
         delta = 1;
-        i = head_idx.min(buffer_rows.len() as u32 - 1);
+        i = head_idx.min(buffer_rows.len().saturating_sub(1) as u32);
         while i > 0 && buffer_rows[i as usize].buffer_row.is_none() {
             i -= 1;
         }
@@ -3811,13 +3831,7 @@ impl EditorElement {
         let multi_buffer = editor.buffer.read(cx);
         let file_status = multi_buffer
             .all_diff_hunks_expanded()
-            .then(|| {
-                editor
-                    .project
-                    .as_ref()?
-                    .read(cx)
-                    .status_for_buffer_id(for_excerpt.buffer_id, cx)
-            })
+            .then(|| editor.status_for_buffer_id(for_excerpt.buffer_id, cx))
             .flatten();
         let indicator = multi_buffer
             .buffer(for_excerpt.buffer_id)
@@ -3897,7 +3911,7 @@ impl EditorElement {
                                         .children(toggle_chevron_icon)
                                         .tooltip({
                                             let focus_handle = focus_handle.clone();
-                                            move |window, cx| {
+                                            move |_window, cx| {
                                                 Tooltip::with_meta_in(
                                                     "Toggle Excerpt Fold",
                                                     Some(&ToggleFold),
@@ -3910,7 +3924,6 @@ impl EditorElement {
                                                         )
                                                     ),
                                                     &focus_handle,
-                                                    window,
                                                     cx,
                                                 )
                                             }
@@ -4011,15 +4024,11 @@ impl EditorElement {
                                             .id("jump-to-file-button")
                                             .gap_2p5()
                                             .child(Label::new("Jump To File"))
-                                            .children(
-                                                KeyBinding::for_action_in(
-                                                    &OpenExcerpts,
-                                                    &focus_handle,
-                                                    window,
-                                                    cx,
-                                                )
-                                                .map(|binding| binding.into_any_element()),
-                                            ),
+                                            .child(KeyBinding::for_action_in(
+                                                &OpenExcerpts,
+                                                &focus_handle,
+                                                cx,
+                                            )),
                                     )
                                 },
                             )
@@ -5100,6 +5109,7 @@ impl EditorElement {
                 snapshot,
                 visible_display_row_range.clone(),
                 max_size,
+                &editor.text_layout_details(window),
                 window,
                 cx,
             )
@@ -7220,16 +7230,9 @@ impl EditorElement {
                             * ScrollPixelOffset::from(max_glyph_advance)
                             - ScrollPixelOffset::from(delta.x * scroll_sensitivity))
                             / ScrollPixelOffset::from(max_glyph_advance);
-
-                        let scale_factor = window.scale_factor();
-                        let y = (current_scroll_position.y
-                            * ScrollPixelOffset::from(line_height)
-                            * ScrollPixelOffset::from(scale_factor)
+                        let y = (current_scroll_position.y * ScrollPixelOffset::from(line_height)
                             - ScrollPixelOffset::from(delta.y * scroll_sensitivity))
-                        .round()
-                            / ScrollPixelOffset::from(line_height)
-                            / ScrollPixelOffset::from(scale_factor);
-
+                            / ScrollPixelOffset::from(line_height);
                         let mut scroll_position =
                             point(x, y).clamp(&point(0., 0.), &position_map.scroll_max);
                         let forbid_vertical_scroll = editor.scroll_manager.forbid_vertical_scroll();
@@ -7262,26 +7265,6 @@ impl EditorElement {
         window.on_mouse_event({
             let position_map = layout.position_map.clone();
             let editor = self.editor.clone();
-            let diff_hunk_range =
-                layout
-                    .display_hunks
-                    .iter()
-                    .find_map(|(hunk, hunk_hitbox)| match hunk {
-                        DisplayDiffHunk::Folded { .. } => None,
-                        DisplayDiffHunk::Unfolded {
-                            multi_buffer_range, ..
-                        } => {
-                            if hunk_hitbox
-                                .as_ref()
-                                .map(|hitbox| hitbox.is_hovered(window))
-                                .unwrap_or(false)
-                            {
-                                Some(multi_buffer_range.clone())
-                            } else {
-                                None
-                            }
-                        }
-                    });
             let line_numbers = layout.line_numbers.clone();
 
             move |event: &MouseDownEvent, phase, window, cx| {
@@ -7298,7 +7281,6 @@ impl EditorElement {
                             Self::mouse_left_down(
                                 editor,
                                 event,
-                                diff_hunk_range.clone(),
                                 &position_map,
                                 line_numbers.as_ref(),
                                 window,
@@ -8939,10 +8921,20 @@ impl Element for EditorElement {
                         cx,
                     );
 
+                    let merged_highlighted_ranges =
+                        if let Some((_, colors)) = document_colors.as_ref() {
+                            &highlighted_ranges
+                                .clone()
+                                .into_iter()
+                                .chain(colors.clone())
+                                .collect()
+                        } else {
+                            &highlighted_ranges
+                        };
                     let bg_segments_per_row = Self::bg_segments_per_row(
                         start_row..end_row,
                         &selections,
-                        &highlighted_ranges,
+                        &merged_highlighted_ranges,
                         self.style.background,
                     );
 
