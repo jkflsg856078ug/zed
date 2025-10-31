@@ -13,6 +13,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '1'
   RUST_BACKTRACE: '1'
+  RUSTFLAGS: '-A unused'
 
 jobs:
   build_windows_binaries:
@@ -93,38 +94,3 @@ jobs:
         with:
           name: linux-remote-server-x86_64
           path: zed-remote-server-linux-x86_64.gz
-
-  build_linux_zed:
-    name: Build Linux Zed
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          clean: false
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y gcc g++ libasound2-dev libfontconfig-dev libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libssl-dev libzstd-dev libvulkan1 make cmake clang mold
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          cache: true
-
-      - name: Build Zed and CLI
-        run: cargo build --release --package zed --package cli
-        shell: bash
-
-      - name: Package binaries
-        run: |
-          mkdir -p zed-linux
-          cp target/release/zed zed-linux/
-          cp target/release/cli zed-linux/
-          tar -czf zed-linux-x86_64.tar.gz -C zed-linux .
-
-      - name: Upload Linux binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-zed-x86_64
-          path: zed-linux-x86_64.tar.gz

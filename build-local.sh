@@ -81,13 +81,31 @@ fi
 
 echo -e "${GREEN}✓${NC} Detected OS: ${YELLOW}$OS${NC}"
 
-# Check for Rust
+# Check for Rust - auto-install if missing
 if ! command -v rustc &> /dev/null; then
-    echo -e "${RED}✗${NC} Rust is not installed!"
+    echo -e "${YELLOW}⚠${NC} Rust is not installed. Installing Rust..."
     echo
-    echo "Install Rust from: https://rustup.rs/"
-    echo "Or run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-    exit 1
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+
+    # Source cargo env
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+
+    if ! command -v rustc &> /dev/null; then
+        echo -e "${RED}✗${NC} Rust installation failed!"
+        echo "Please install manually from: https://rustup.rs/"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✓${NC} Rust installed successfully"
+fi
+
+# Ensure rustup is available
+if ! command -v rustup &> /dev/null; then
+    echo -e "${YELLOW}⚠${NC} rustup not found. Installing..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+    source "$HOME/.cargo/env"
 fi
 
 RUST_VERSION=$(rustc --version)
@@ -141,10 +159,15 @@ if [ "$SKIP_DEPS" = false ]; then
 
         echo -e "${GREEN}✓${NC} Dependencies installed"
 
-        # Add musl target for remote_server
-        echo -e "${YELLOW}Adding musl target for static remote_server build...${NC}"
-        rustup target add x86_64-unknown-linux-musl
-        echo -e "${GREEN}✓${NC} musl target added"
+        # Add musl target for remote_server - check if already installed
+        echo -e "${YELLOW}Checking musl target for static remote_server build...${NC}"
+        if ! rustup target list --installed | grep -q "x86_64-unknown-linux-musl"; then
+            echo -e "${YELLOW}Installing musl target...${NC}"
+            rustup target add x86_64-unknown-linux-musl
+            echo -e "${GREEN}✓${NC} musl target installed"
+        else
+            echo -e "${GREEN}✓${NC} musl target already installed"
+        fi
 
     elif [ "$OS" = "macos" ]; then
         if ! command -v brew &> /dev/null; then
@@ -174,6 +197,9 @@ if [ "$CLEAN_BUILD" = true ]; then
     cargo clean
     echo -e "${GREEN}✓${NC} Clean complete"
 fi
+
+# Set RUSTFLAGS to allow unused variables
+export RUSTFLAGS="${RUSTFLAGS:--A unused}"
 
 # Build type
 echo
