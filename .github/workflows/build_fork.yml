@@ -5,6 +5,17 @@ on:
     branches:
       - 'claude/**'
   workflow_dispatch:
+    inputs:
+      build_windows:
+        description: 'Build Windows binaries'
+        required: false
+        type: boolean
+        default: true
+      build_linux:
+        description: 'Build Linux remote server'
+        required: false
+        type: boolean
+        default: true
   pull_request:
     branches:
       - 'claude/**'
@@ -16,9 +27,50 @@ env:
   RUSTFLAGS: '-A unused'
 
 jobs:
+  detect_changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      source_changed: ${{ steps.filter.outputs.source }}
+      windows_needed: ${{ steps.check.outputs.windows_needed }}
+      linux_needed: ${{ steps.check.outputs.linux_needed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for source changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            source:
+              - 'crates/**/*.rs'
+              - 'crates/**/Cargo.toml'
+              - 'Cargo.lock'
+              - 'Cargo.toml'
+              - '.github/workflows/build_fork.yml'
+
+      - name: Determine what to build
+        id: check
+        run: |
+          # Manual workflow dispatch - use inputs
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "windows_needed=${{ inputs.build_windows }}" >> $GITHUB_OUTPUT
+            echo "linux_needed=${{ inputs.build_linux }}" >> $GITHUB_OUTPUT
+          # Automatic trigger - build only if source changed
+          else
+            echo "windows_needed=${{ steps.filter.outputs.source }}" >> $GITHUB_OUTPUT
+            echo "linux_needed=${{ steps.filter.outputs.source }}" >> $GITHUB_OUTPUT
+          fi
+
+
   build_windows_binaries:
     name: Build Windows Binaries
     runs-on: windows-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.windows_needed == 'true'
     steps:
       - name: Enable long paths
         run: |
@@ -83,6 +135,8 @@ jobs:
   build_linux_remote_server:
     name: Build Linux Remote Server
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.linux_needed == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
